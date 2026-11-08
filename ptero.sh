@@ -2,20 +2,110 @@
 
 set -o pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# ====================================================
+# BOOTSTRAP
+# Mendukung dua cara menjalankan:
+#   1) Lokal      : bash /root/ptero-manager/ptero.sh
+#   2) One-liner  : bash <(curl -s https://raw.githubusercontent.com/reski232121/ptero-manager/main/ptero.sh)
+# Pada mode one-liner, $0 hanyalah pipe (/dev/fd/63) sehingga folder modules/
+# tidak ada di dekat script. Karena itu repo diunduh dulu ke INSTALL_DIR,
+# lalu script dijalankan ulang dari sana.
+# ====================================================
+
+REPO_OWNER="reski232121"
+REPO_NAME="ptero-manager"
+REPO_BRANCH="main"
+REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
+REPO_TARBALL="https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/${REPO_BRANCH}"
+REPO_RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
+INSTALL_DIR="${PTERO_MANAGER_DIR:-/root/ptero-manager}"
+
+# Cetak folder tempat ptero.sh berada (hanya jika berupa file asli yang punya modules/).
+function _resolve_script_dir() {
+    local src="${BASH_SOURCE[0]:-$0}" real dir
+    [ -f "$src" ] || return 1
+    real=$(readlink -f "$src" 2>/dev/null) || return 1
+    case "$real" in
+        /dev/*|/proc/*) return 1 ;;
+    esac
+    dir=$(dirname "$real")
+    [ -f "$dir/modules/config.sh" ] || return 1
+    printf '%s\n' "$dir"
+}
+
+# Sinkronkan repo ke folder target (git kalau ada, kalau tidak pakai tarball).
+function _sync_repo() {
+    local target="$1" tmp
+    if command -v git >/dev/null 2>&1; then
+        if [ -d "$target/.git" ]; then
+            if git -C "$target" fetch --depth 1 origin "$REPO_BRANCH" >/dev/null 2>&1 \
+               && git -C "$target" reset --hard FETCH_HEAD >/dev/null 2>&1; then
+                return 0
+            fi
+        elif [ ! -e "$target" ] || [ -z "$(ls -A "$target" 2>/dev/null)" ]; then
+            rm -rf "$target"
+            if git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$target" >/dev/null 2>&1; then
+                return 0
+            fi
+        fi
+    fi
+    # Fallback: tarball
+    tmp=$(mktemp -d) || return 1
+    if curl -fsSL --retry 3 "$REPO_TARBALL" | tar -xz -C "$tmp" --strip-components=1 \
+       && [ -f "$tmp/modules/config.sh" ]; then
+        mkdir -p "$target"
+        cp -a "$tmp"/. "$target"/
+        rm -rf "$tmp"
+        return 0
+    fi
+    rm -rf "$tmp"
+    return 1
+}
+
+function _bootstrap_repo() {
+    echo "[ptero-manager] Modul tidak ada di lokal, mengunduh dari GitHub ke $INSTALL_DIR ..."
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "ERROR: Jalankan sebagai root (gunakan: sudo -i)."
+        exit 1
+    fi
+    if [ -n "${PTERO_BOOTSTRAPPED:-}" ]; then
+        echo "ERROR: Modul masih tidak ditemukan setelah download. Cek $INSTALL_DIR/modules"
+        exit 1
+    fi
+    if ! command -v curl >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+        echo "[ptero-manager] Menginstall curl & git ..."
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq >/dev/null 2>&1
+        apt-get install -y -qq curl git ca-certificates >/dev/null 2>&1 || true
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "ERROR: curl tidak tersedia dan gagal diinstall."
+        exit 1
+    fi
+    if ! _sync_repo "$INSTALL_DIR"; then
+        echo "ERROR: Gagal mengunduh repo dari $REPO_URL"
+        echo "       Cek koneksi internet / apakah repo bersifat public."
+        exit 1
+    fi
+    chmod +x "$INSTALL_DIR/ptero.sh"
+    ln -sf "$INSTALL_DIR/ptero.sh" /usr/local/bin/ptero 2>/dev/null || true
+    export PTERO_BOOTSTRAPPED=1
+    exec bash "$INSTALL_DIR/ptero.sh" "$@"
+}
+
+SCRIPT_DIR="$(_resolve_script_dir)" || _bootstrap_repo "$@"
+SCRIPT_PATH="$SCRIPT_DIR/ptero.sh"
 MODULES_DIR="$SCRIPT_DIR/modules"
+
 for module in config helpers install update backup cloudflare monitoring management optimize repair features extras uninstall remote-node eggs migration wings config-manual-wings config-auto-wings addons; do
     if [ -f "$MODULES_DIR/$module.sh" ]; then
+        # shellcheck disable=SC1090
         source "$MODULES_DIR/$module.sh"
     else
         echo "ERROR: Module $module.sh not found in $MODULES_DIR"
         exit 1
     fi
 done
-
-# ====================================================
-# MAIN MENU
-# ====================================================
 
 # ====================================================
 # MAIN MENU
@@ -363,7 +453,10 @@ function menu_danger() {
 # ====================================================
 
 function self_check() {
-    bash -n "$0" 2>/dev/null || return 1
+    local f
+    for f in "$SCRIPT_PATH" "$MODULES_DIR"/*.sh; do
+        bash -n "$f" 2>/dev/null || { echo "SYNTAX ERROR: $f"; return 1; }
+    done
     local missing=0 fn
     for fn in install_pterodactyl \
               update_panel update_wings_only provision_services write_nginx_config \
