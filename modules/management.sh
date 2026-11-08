@@ -66,7 +66,7 @@ function change_db_password() {
         chmod 600 "$AUTO_BACKUP_CNF"
         umask "$_old_umask"
         local script_path
-        script_path=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+        script_path="$SCRIPT_PATH"
         cat > "$AUTO_BACKUP_SCRIPT" <<AUTO
 #!/bin/bash
 exec bash '$script_path' --auto-backup --cnf '$AUTO_BACKUP_CNF'
