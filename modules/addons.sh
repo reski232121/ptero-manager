@@ -1253,7 +1253,7 @@ _addon_handle_code_linter() {
     echo -e "    $(_addon_color 36 "  Installing linter packages...")"
     cd "$PANEL_DIR"
     yarn add htmlhint js-yaml jshint jsonlint-mod 2>/dev/null || true
-    cd "$SCRIPT_DIR" 2>/dev/null || cd /root/ptero-manager 2>/dev/null || true
+    cd "$SCRIPT_DIR" 2>/dev/null || true
     _addon_yarn_build
 }
 
@@ -1339,7 +1339,7 @@ _addon_yarn_build() {
         export NODE_OPTIONS=--openssl-legacy-provider
         yarn install --frozen-lockfile 2>/dev/null || yarn install 2>/dev/null || true
         yarn build:production 2>/dev/null || yarn run build 2>/dev/null || true
-        cd "$SCRIPT_DIR" 2>/dev/null || cd /root/ptero-manager 2>/dev/null || true
+        cd "$SCRIPT_DIR" 2>/dev/null || true
     fi
 }
 
@@ -1534,7 +1534,7 @@ _addon_install_single() {
         sudo -u www-data php artisan optimize:clear 2>/dev/null || sudo -u www-data php artisan view:clear 2>/dev/null || true
         echo -e "  $(_addon_color 36 'Optimasi panel...')"
         sudo -u www-data php artisan optimize 2>/dev/null || true
-        cd "$SCRIPT_DIR" 2>/dev/null || cd /root/ptero-manager 2>/dev/null || true
+        cd "$SCRIPT_DIR" 2>/dev/null || true
     fi
 
     # ---- BUILD FRONTEND ----
@@ -1547,7 +1547,7 @@ _addon_install_single() {
             yarn install --frozen-lockfile 2>/dev/null || yarn install 2>/dev/null || true
             yarn build:production 2>/dev/null || yarn run build 2>/dev/null || \
                 echo -e "  $(_addon_color 33 '  ~ Build frontend skipped (manual)')"
-            cd "$SCRIPT_DIR" 2>/dev/null || cd /root/ptero-manager 2>/dev/null || true
+            cd "$SCRIPT_DIR" 2>/dev/null || true
         else
             echo -e "  $(_addon_color 33 '  ~ Yarn tidak tersedia')"
         fi
@@ -1569,7 +1569,7 @@ _addon_install_single() {
         npm install -g ainx 2>/dev/null || true
         cd "$PANEL_DIR"
         ainx install "$ainx_file" --force 2>/dev/null || ainx install "$ainx_file" 2>/dev/null || true
-        cd "$SCRIPT_DIR" 2>/dev/null || cd /root/ptero-manager 2>/dev/null || true
+        cd "$SCRIPT_DIR" 2>/dev/null || true
         echo -e "  $(_addon_color 32 "  + ainx patch applied")"
     fi
 
@@ -1952,7 +1952,7 @@ _addon_uninstall_single() {
     sudo -u www-data php artisan config:cache 2>/dev/null || true
     sudo -u www-data php artisan route:cache 2>/dev/null || true
     sudo -u www-data php artisan view:cache 2>/dev/null || true
-    cd "$SCRIPT_DIR" 2>/dev/null || cd /root/ptero-manager 2>/dev/null || true
+    cd "$SCRIPT_DIR" 2>/dev/null || true
 
     echo
     echo -e "  $(_addon_color 32 "✓ Addon '$addon' berhasil diuninstall!")"
@@ -2186,27 +2186,18 @@ _addon_backup() {
     ts=$(date +%Y%m%d-%H%M%S)
     local zipname="ptero-manager-backup-$ts.zip"
 
-    echo -e "  $(_addon_color 33 'Mengompres ptero-manager + opencode config...')"
+    echo -e "  $(_addon_color 33 'Mengompres ptero-manager + routes panel...')"
+
+    local rel_script="${SCRIPT_DIR#/}"
+    local -a files=("$rel_script/")
+    local r
+    for r in admin.php api-client.php api-remote.php; do
+        [ -f "$PANEL_DIR/routes/$r" ] && files+=("${PANEL_DIR#/}/routes/$r")
+    done
 
     cd /
-    # Flush WAL to DB so backup is consistent
-    sqlite3 /root/.local/share/opencode/opencode.db "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null
-
-    zip -r "$backup_dir/$zipname" \
-        root/ptero-manager/ \
-        root/.local/share/opencode/opencode.db \
-        root/.local/share/opencode/storage/session_diff/ \
-        root/.local/share/opencode/tool-output/ \
-        root/.local/share/opencode/log/ \
-        root/.local/state/opencode/prompt-history.jsonl \
-        root/.local/state/opencode/kv.json \
-        root/.local/state/opencode/model.json \
-        home/runner/.config/opencode/opencode.jsonc \
-        var/www/pterodactyl/routes/admin.php \
-        var/www/pterodactyl/routes/api-client.php \
-        var/www/pterodactyl/routes/api-remote.php \
-        -x "root/ptero-manager/.git/*" "root/ptero-manager/addon-pterodactyl/*.zip" 2>&1 | tail -3
-
+    zip -r "$backup_dir/$zipname" "${files[@]}" \
+        -x "$rel_script/.git/*" "$rel_script/addon-pterodactyl/*.zip" 2>&1 | tail -3
     echo
     echo -e "  $(_addon_color 32 "✓ Backup selesai!")"
     echo -e "  File: $backup_dir/$zipname"
