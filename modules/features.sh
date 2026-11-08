@@ -52,19 +52,17 @@ function set_custom_banner() {
 
 function script_rollback() {
     require_root || return 1
-    local current bak
-    current=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
-    bak="${current}.bak"
-    if [ ! -f "$bak" ]; then
-        fail "File backup tidak ditemukan: $bak"; pause; return 1
+    local snap="/var/backups/ptero-manager/script-rollback.tar.gz"
+    if [ ! -f "$snap" ]; then
+        fail "Snapshot rollback tidak ditemukan: $snap"; pause; return 1
     fi
     confirm_action "Rollback script ke versi sebelum self-update?" \
         || { echo "Batal."; pause; return 0; }
-    cp -f "$current" "${current}.tmp"
-    mv -f "$bak" "$current"
-    mv -f "${current}.tmp" "$bak"
-    chmod +x "$current"
-    log_msg "Script di-rollback dari .bak"
+    if ! tar -xzf "$snap" -C "$SCRIPT_DIR"; then
+        fail "Gagal mengekstrak snapshot rollback."; pause; return 1
+    fi
+    chmod +x "$SCRIPT_PATH"
+    log_msg "Script di-rollback dari snapshot"
     echo -e "${GREEN}Rollback selesai. Jalankan ulang script.${NC}"
     pause
     return 0
@@ -231,7 +229,7 @@ ${CYAN}Keamanan:${NC}
   - Lock file: \$LOCK_FILE (mencegah backup paralel)
 
 ${CYAN}File penting:${NC}
-  - Script         : $0
+  - Script         : $SCRIPT_PATH
   - Panel          : $PANEL_DIR
   - Wings config   : $WINGS_DIR/config.yml
   - Backup         : $BACKUP_ROOT
