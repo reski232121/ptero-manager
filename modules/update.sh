@@ -194,7 +194,7 @@ function setup_auto_updates() {
     confirm_action "Aktifkan auto security updates?" || { pause; return 0; }
 
     local script_path
-    script_path=$(readlink -f "$(dirname "$0")/../ptero.sh" 2>/dev/null || printf '%s' "$0")
+    script_path="$SCRIPT_PATH"
 
     cat > "$AUTO_UPDATE_SCRIPT" <<'AUTO'
 #!/bin/bash
@@ -207,15 +207,22 @@ flock -n 9 || exit 0
 PANEL_DIR="/var/www/pterodactyl"
 WINGS_BIN="/usr/local/bin/wings"
 
+# Muat konfigurasi (token Telegram/Discord, PANEL_DIR) karena cron tidak punya env script utama
+[ -f /root/.ptero-manager.conf ] && . /root/.ptero-manager.conf 2>/dev/null
+
 notify_msg() {
     local msg="$1"
     echo "[$(date '+%F %T')] $msg" >> "$LOG"
-    curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
-        --data-urlencode "text=$msg" \
-        --data-urlencode "parse_mode=Markdown" >/dev/null 2>&1 || true
-    curl -fsS -H "Content-Type: application/json" -X POST \
-        -d "{\"content\": \"$msg\"}" "$DISCORD_WEBHOOK" >/dev/null 2>&1 || true
+    if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+        curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+            --data-urlencode "text=$msg" \
+            --data-urlencode "parse_mode=Markdown" >/dev/null 2>&1 || true
+    fi
+    if [ -n "${DISCORD_WEBHOOK:-}" ]; then
+        curl -fsS -H "Content-Type: application/json" -X POST \
+            -d "{\"content\": \"$msg\"}" "$DISCORD_WEBHOOK" >/dev/null 2>&1 || true
+    fi
 }
 
 # Check Panel
