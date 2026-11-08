@@ -61,38 +61,45 @@ function restart_all_services() {
 function check_script_update() {
     require_root || return 1
     header
-    if [ -z "$SCRIPT_UPDATE_URL" ]; then
-        echo -e "${YELLOW}URL update belum diset.${NC}"
-        echo
-        read -r -p "Masukkan URL raw script (contoh https://.../ptero.sh) atau kosong untuk batal: " URL
-        if [ -z "$URL" ]; then return 0; fi
-        SCRIPT_UPDATE_URL="$URL"
-        save_config
-    fi
-    echo -e "${BLUE}Cek versi terbaru dari $SCRIPT_UPDATE_URL ...${NC}"
-    local tmp="/tmp/ptero.sh.new"
-    if ! curl -fsSL "$SCRIPT_UPDATE_URL" -o "$tmp"; then
-        rm -f "$tmp"; fail "Gagal download script terbaru."; pause; return 1
-    fi
-    if ! bash -n "$tmp"; then
-        rm -f "$tmp"; fail "Script terbaru rusak (syntax error)."; pause; return 1
-    fi
+    echo -e "${BLUE}Cek versi terbaru dari GitHub (${REPO_OWNER}/${REPO_NAME}@${REPO_BRANCH}) ...${NC}"
     local new_ver
-    new_ver=$(grep -m1 '^SCRIPT_VERSION=' "$tmp" | cut -d'"' -f2)
+    new_ver=$(curl -fsSL --max-time 15 "$REPO_RAW_BASE/modules/config.sh" 2>/dev/null \
+        | grep -m1 '^SCRIPT_VERSION=' | cut -d'"' -f2)
+    if [ -z "$new_ver" ]; then
+        fail "Gagal mengambil info versi terbaru dari GitHub."; pause; return 1
+    fi
     echo -e "Versi sekarang : ${CYAN}$SCRIPT_VERSION${NC}"
-    echo -e "Versi terbaru  : ${CYAN}${new_ver:-unknown}${NC}"
+    echo -e "Versi terbaru  : ${CYAN}$new_ver${NC}"
     if [ "$new_ver" = "$SCRIPT_VERSION" ]; then
         echo -e "${GREEN}Sudah versi terbaru.${NC}"
-        rm -f "$tmp"; pause; return 0
+        pause; return 0
     fi
-    confirm_action "Update script ke versi $new_ver?" || { rm -f "$tmp"; pause; return 0; }
-    local current
-    current=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
-    cp -f "$current" "${current}.bak"
-    mv -f "$tmp" "$current"
-    chmod +x "$current"
+    echo -e "${YELLOW}Catatan: file lokal di $SCRIPT_DIR akan ditimpa dengan versi GitHub.${NC}"
+    confirm_action "Update script ke versi $new_ver?" || { pause; return 0; }
+
+    local snapdir="/var/backups/ptero-manager" snap
+    snap="$snapdir/script-rollback.tar.gz"
+    mkdir -p "$snapdir"
+    tar -czf "$snap" -C "$SCRIPT_DIR" ptero.sh modules \
+        || { fail "Gagal membuat snapshot rollback. Update dibatalkan."; pause; return 1; }
+
+    if ! _sync_repo "$SCRIPT_DIR"; then
+        fail "Gagal download update. Mengembalikan versi lama."
+        tar -xzf "$snap" -C "$SCRIPT_DIR"
+        pause; return 1
+    fi
+    local f bad=0
+    for f in "$SCRIPT_PATH" "$MODULES_DIR"/*.sh; do
+        bash -n "$f" 2>/dev/null || { bad=1; fail "Syntax error di $f"; }
+    done
+    if [ "$bad" -eq 1 ]; then
+        fail "Versi baru rusak. Mengembalikan versi lama."
+        tar -xzf "$snap" -C "$SCRIPT_DIR"
+        pause; return 1
+    fi
+    chmod +x "$SCRIPT_PATH"
     log_msg "Script di-update ke versi $new_ver"
-    echo -e "${GREEN}Script berhasil di-update. Backup lama: ${current}.bak${NC}"
+    echo -e "${GREEN}Script berhasil di-update ke $new_ver. Snapshot lama: $snap${NC}"
     echo -e "${YELLOW}Jalankan ulang script untuk memuat versi baru.${NC}"
     pause
     return 0
