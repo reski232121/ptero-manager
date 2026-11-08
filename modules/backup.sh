@@ -383,7 +383,7 @@ function schedule_auto_backup() {
     local hour minute script_path
     hour=${BACKUP_TIME%:*}
     minute=${BACKUP_TIME#*:}
-    script_path=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+    script_path="$SCRIPT_PATH"
     mkdir -p "$(dirname "$AUTO_BACKUP_CNF")"
     chmod 700 "$(dirname "$AUTO_BACKUP_CNF")"
     local _old_umask
